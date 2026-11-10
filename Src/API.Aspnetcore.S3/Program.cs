@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddProblemDetails();
+builder.Services.AddAuthorization();
 
 AWSOptions aWSOptions = builder.Configuration.GetAWSOptions();
 builder.Services.AddDefaultAWSOptions(aWSOptions);
@@ -63,3 +64,5 @@ app.MapBucketEndpoints();
 app.MapObjectEndpoints();
 
 app.Run();
+
+public partial class Program;

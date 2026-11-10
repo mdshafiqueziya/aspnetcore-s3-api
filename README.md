@@ -182,6 +182,14 @@ dotnet restore Src/API.Aspnetcore.S3.slnx
 dotnet build Src/API.Aspnetcore.S3.slnx
 ```
 
+Run the test suite:
+
+```bash
+dotnet test Src/API.Aspnetcore.S3.slnx
+```
+
+The solution includes `API.Aspnetcore.S3.Tests`, with unit tests for feature validators and integration tests for Minimal API validation responses. Integration tests replace the AWS client with a mock and do not require AWS credentials.
+
 Run the API:
 
 ```bash
