@@ -1,6 +1,5 @@
 using Amazon.Extensions.NETCore.Setup;
 using Amazon.S3;
-using Amazon.S3.Model;
 using API.Aspnetcore.S3.Features.Buckets;
 using API.Aspnetcore.S3.Features.Objects;
 using Microsoft.AspNetCore.Diagnostics;
