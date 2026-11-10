@@ -11,18 +11,14 @@ REST API built with ASP.NET Core for common Amazon S3 operations such as bucket 
 
 ## Architecture
 
-This application uses a simple layered ASP.NET Core Web API architecture. It is organized around HTTP controllers, application services, lightweight models, and the AWS SDK client registered through dependency injection.
+This application uses a pragmatic vertical slice architecture. Code is grouped by business capability rather than by technical type: the Buckets slice owns bucket endpoints, requests, and S3 operations, while the Objects slice owns object endpoints, responses, validation, and S3 operations.
 
 The request flow is:
 
 ```text
 HTTP Request
     ↓
-Controller
-    ↓
-Service Interface
-    ↓
-Service Implementation
+Buckets or Objects slice
     ↓
 AWS SDK IAmazonS3 Client
     ↓
@@ -33,11 +29,10 @@ Amazon S3
 
 | Layer | Location | Responsibility |
 | --- | --- | --- |
-| API / Presentation Layer | `Controllers` | Exposes REST endpoints, receives route/query/body/form-data input, and returns HTTP responses. |
-| Service Layer | `Services` | Contains the application logic for S3 bucket and object operations. Controllers depend on service interfaces instead of directly using the AWS SDK. |
-| Model Layer | `Models` | Defines request and response DTOs used by the API. |
+| Buckets slice | `Features/Buckets` | Owns bucket and folder endpoints, request models, and bucket S3 operations. |
+| Objects slice | `Features/Objects` | Owns upload, listing, download, and pre-signed URL endpoints, response models, and object S3 operations. |
 | Infrastructure / External Service Layer | AWS SDK `IAmazonS3` | Provides access to Amazon S3. The client is registered in `Program.cs` using `AddAWSService<IAmazonS3>()`. |
-| Composition Root | `Program.cs` | Configures controllers, Swagger/OpenAPI, AWS options, dependency injection, middleware, and endpoint mapping. |
+| Composition Root | `Program.cs` | Configures Minimal APIs, Swagger/OpenAPI, AWS options, dependency injection, middleware, and endpoint mapping. It does not contain feature behavior. |
 
 ### Dependency Injection
 
@@ -49,15 +44,20 @@ builder.Services.AddScoped<IBucketService, BucketService>();
 builder.Services.AddScoped<IObjectService, ObjectService>();
 ```
 
-This keeps controllers thin and allows S3-specific logic to live in the service layer:
+Each slice keeps its endpoints, validators, handlers, and S3 behavior close together:
 
-- `BucketController` depends on `IBucketService`.
-- `ObjectController` depends on `IObjectService`.
-- `BucketService` and `ObjectService` depend on `IAmazonS3`.
+- `Features/Buckets/BucketEndpoints.cs` maps the bucket routes.
+- `Features/Buckets/BucketValidator.cs` validates bucket requests.
+- `Features/Buckets/BucketHandler.cs` coordinates bucket operations.
+- `Features/Buckets/BucketService.cs` depends on `IAmazonS3`.
+- `Features/Objects/ObjectEndpoints.cs` maps the object routes.
+- `Features/Objects/ObjectValidator.cs` validates object requests.
+- `Features/Objects/ObjectHandler.cs` coordinates object operations.
+- `Features/Objects/ObjectService.cs` depends on `IAmazonS3`.
 
 ### Architectural Style
 
-The project is best described as a monolithic, layered REST API. It is not using Clean Architecture, CQRS, Repository Pattern, MediatR, domain-driven design, or a microservice split. Because the current scope is focused on S3 operations, the layers are intentionally lightweight and live inside a single ASP.NET Core project.
+The project is a monolithic REST API organized with pragmatic vertical slices. It is not using Clean Architecture, CQRS, Repository Pattern, MediatR, domain-driven design, or a microservice split. Each slice is intentionally lightweight and can evolve independently inside the single ASP.NET Core project.
 
 ## Project Structure
 
@@ -68,15 +68,19 @@ The project is best described as a monolithic, layered REST API. It is not using
 └── Src
     ├── API.Aspnetcore.S3.slnx
     └── API.Aspnetcore.S3
-        ├── Controllers
-        │   ├── BucketController.cs
-        │   └── ObjectController.cs
-        ├── Models
-        │   ├── CreateBucketRequest.cs
-        │   └── ObjectResponse.cs
-        ├── Services
-        │   ├── BucketService.cs
-        │   └── ObjectService.cs
+        ├── Features
+        │   ├── Buckets
+        │   │   ├── BucketEndpoints.cs
+        │   │   ├── BucketHandler.cs
+        │   │   ├── BucketService.cs
+        │   │   ├── BucketValidator.cs
+        │   │   └── Models/BucketRequests.cs
+        │   └── Objects
+        │       ├── ObjectEndpoints.cs
+        │       ├── ObjectHandler.cs
+        │       ├── ObjectService.cs
+        │       ├── ObjectValidator.cs
+        │       └── Models/ObjectResponse.cs
         ├── Program.cs
         ├── appsettings.json
         └── API.Aspnetcore.S3.csproj
@@ -95,7 +99,7 @@ The project is best described as a monolithic, layered REST API. It is not using
 - Download an object.
 - Generate a pre-signed download URL.
 
-`ObjectService` also contains methods for deleting objects and generating pre-signed upload URLs, but those methods are not currently exposed through `ObjectController`.
+`ObjectService` also contains methods for deleting objects and generating pre-signed upload URLs, but those methods are not currently exposed through the Minimal API endpoints.
 
 ## Prerequisites
 
@@ -262,17 +266,17 @@ List objects:
 curl "http://localhost:5260/api/objects?bucketName=my-s3-bucket"
 ```
 
-Download an object:
+Download an object using the key returned by the upload endpoint:
 
 ```bash
-curl -L "http://localhost:5260/api/objects/download?bucket=my-s3-bucket&key=example.txt" \
+curl -L "http://localhost:5260/api/objects/download?bucket=my-s3-bucket&key=uploads%2F<upload-id>%2Fexample.txt" \
   -o example.txt
 ```
 
-Generate a pre-signed download URL:
+Generate a pre-signed download URL using the returned object key:
 
 ```bash
-curl "http://localhost:5260/api/objects/pre-signed-url?bucketName=my-s3-bucket&key=example.txt&expiryMinutes=15"
+curl "http://localhost:5260/api/objects/pre-signed-url?bucketName=my-s3-bucket&key=uploads%2F<upload-id>%2Fexample.txt&expiryMinutes=15"
 ```
 
 Delete a bucket:
@@ -285,9 +289,11 @@ curl -X DELETE http://localhost:5260/api/buckets/my-s3-bucket
 
 - Swagger and OpenAPI are only mapped when `ASPNETCORE_ENVIRONMENT` is `Development`.
 - Bucket deletion requires the bucket to be empty.
-- Uploaded object keys use the incoming file name.
+- Uploaded object keys use a generated unique prefix and a sanitized version of the incoming file name, preventing accidental overwrites.
+- Uploads are limited to 50 MB per file and 20 files per multi-upload request.
+- Pre-signed URL expiry is limited to 1–60 minutes.
 - There is no authentication or authorization policy configured in this API yet, even though `UseAuthorization()` is present in the pipeline.
-- Exceptions are not currently translated into custom API error responses, so AWS SDK exceptions may surface as default ASP.NET Core error responses.
+- Validation and AWS errors are returned as standard problem-details responses with appropriate HTTP status codes.
 
 ## License
 
